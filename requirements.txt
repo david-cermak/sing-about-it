@@ -1,3 +1,19 @@
+# Core AI and Search
 pydantic-ai
 ollama
 ddgs
+
+# Web Scraping and Processing
+beautifulsoup4
+requests
+newspaper3k
+readability-lxml
+aiohttp
+urllib3
+markdownify
+validators
+fake-useragent
+
+# Configuration and Utilities
+python-dotenv
+python-magic
