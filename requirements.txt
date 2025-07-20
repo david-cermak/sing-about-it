@@ -1,5 +1,5 @@
 # Core AI and Search
-pydantic-ai
+pydantic-ai[logfire]
 ollama
 ddgs
 

@@ -13,6 +13,16 @@ sys.path.append(str(Path(__file__).parent.parent))
 from config.models import WebSearchResult, SourceEvaluation
 from config.settings import settings
 
+# Configure logfire for detailed debugging (if available)
+try:
+    import logfire
+    logfire.configure(send_to_logfire=False)  # Keep logs local during development
+    logfire.instrument_pydantic_ai()
+    print("✅ Logfire configured for detailed pydantic-ai debugging")
+except ImportError:
+    print("ℹ️  Logfire not available - install with: pip install 'pydantic-ai[logfire]'")
+    logfire = None
+
 
 # Create the source evaluation agent
 def create_source_evaluator() -> Agent:
@@ -174,17 +184,102 @@ Provide scores, classification, and a clear decision on whether to scrape this s
 
     # Strategy 1: Try with pydantic-ai agent
     try:
+        print(f"🔍 Evaluating source {result.url} with pydantic-ai agent")
         evaluator = create_source_evaluator()
+
+        # Let's try to capture the raw response for debugging
+        if settings.logging.verbose_output:
+            print(f"    🔍 DEBUG: Sending prompt to LLM...")
+
         result_eval = evaluator.run_sync(prompt)
         return result_eval.data
     except Exception as e:
         if settings.logging.verbose_output:
             print(f"    ⚠️  Pydantic-AI failed: {e}")
+            print(f"    🔍 DEBUG: Exception type: {type(e).__name__}")
+            print(f"    🔍 DEBUG: Exception module: {type(e).__module__}")
+
+            # Print the full exception chain
+            current_exception = e
+            level = 0
+            while current_exception:
+                indent = "    " + "  " * level
+                print(f"{indent}🔍 Exception level {level}: {type(current_exception).__name__}: {current_exception}")
+                current_exception = getattr(current_exception, '__cause__', None)
+                level += 1
+                if level > 5:  # Prevent infinite loops
+                    break
+
+            # If it's a validation error, try to capture the raw response
+            if ("validation" in str(e).lower() or "output" in str(e).lower() or
+                "retries" in str(e).lower() or "schema" in str(e).lower()):
+                print(f"    🔍 DEBUG: This appears to be a validation/parsing error. Capturing raw LLM response...")
+
+                # Make a simple raw call to see what the LLM actually returned
+                try:
+                    import requests
+                    api_url = settings.llm.base_url.replace('/v1', '') + '/api/generate'
+
+                    payload = {
+                        "model": settings.llm.model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "options": {"temperature": 0.1}
+                    }
+
+                    response = requests.post(api_url, json=payload, timeout=30)
+                    if response.status_code == 200:
+                        raw_response = response.json()['response']
+                        print(f"    🔍 DEBUG: Raw LLM response that failed validation:")
+                        print(f"    📝 START_RESPONSE")
+                        print(f"{raw_response}")
+                        print(f"    📝 END_RESPONSE")
+
+                        # Try to parse the JSON manually to see what's wrong
+                        try:
+                            import json
+                            # Clean the response first
+                            cleaned = raw_response.strip()
+                            if cleaned.startswith('```json'):
+                                cleaned = cleaned.replace('```json', '').replace('```', '').strip()
+                            if cleaned.startswith('```'):
+                                cleaned = cleaned.replace('```', '').strip()
+
+                            parsed = json.loads(cleaned)
+                            print(f"    ✅ DEBUG: JSON is valid! Parsed: {parsed}")
+                            print(f"    🔍 DEBUG: Keys in response: {list(parsed.keys())}")
+
+                            # Check if it matches our expected schema
+                            expected_fields = {"url", "title", "relevance_score", "authority_score",
+                                             "content_type", "should_scrape", "reasoning", "estimated_quality"}
+                            actual_fields = set(parsed.keys())
+                            missing = expected_fields - actual_fields
+                            extra = actual_fields - expected_fields
+
+                            if missing:
+                                print(f"    ❌ DEBUG: Missing required fields: {missing}")
+                            if extra:
+                                print(f"    ⚠️  DEBUG: Extra fields (might be ok): {extra}")
+
+                        except json.JSONDecodeError as json_e:
+                            print(f"    ❌ DEBUG: JSON parsing failed: {json_e}")
+                            print(f"    🔍 DEBUG: Problematic JSON character position: {json_e.pos if hasattr(json_e, 'pos') else 'unknown'}")
+
+                    else:
+                        print(f"    🔍 DEBUG: Failed to get raw response: HTTP {response.status_code}")
+                        if response.text:
+                            print(f"    🔍 DEBUG: Error response: {response.text}")
+
+                except Exception as debug_e:
+                    print(f"    🔍 DEBUG: Failed to capture raw response: {debug_e}")
+            else:
+                print(f"    🔍 DEBUG: This doesn't appear to be a validation error - might be network/API issue")
 
     # Strategy 2: Try raw LLM call with JSON parsing
     try:
         import requests
         import json
+        print(f"🔍 Evaluating source {result.url} with raw LLM call")
 
         # Make direct API call
         api_url = settings.llm.base_url.replace('/v1', '') + '/api/generate'
