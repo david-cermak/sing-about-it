@@ -65,6 +65,11 @@ class LoggingConfig(BaseModel):
     save_scraped_content: bool = Field(default=False, description="Save scraped content to files")
 
 
+class AgentConfig(BaseModel):
+    """Agent backend configuration."""
+    backend_type: str = Field(default="pydantic_ai", description="Agent backend type: 'pydantic_ai' or 'baremetal'")
+
+
 class Settings(BaseModel):
     """Main application settings."""
     llm: LLMConfig = Field(default_factory=LLMConfig)
@@ -73,6 +78,7 @@ class Settings(BaseModel):
     scraping: ScrapingConfig = Field(default_factory=ScrapingConfig)
     content_processing: ContentProcessingConfig = Field(default_factory=ContentProcessingConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    agent: AgentConfig = Field(default_factory=AgentConfig)
 
     @classmethod
     def from_env(cls) -> 'Settings':
@@ -111,6 +117,9 @@ class Settings(BaseModel):
                 log_level=os.getenv('LOG_LEVEL', 'INFO'),
                 verbose_output=os.getenv('VERBOSE_OUTPUT', 'true').lower() == 'true',
                 save_scraped_content=os.getenv('SAVE_SCRAPED_CONTENT', 'false').lower() == 'true'
+            ),
+            agent=AgentConfig(
+                backend_type=os.getenv('AGENT_BACKEND', 'pydantic_ai')
             )
         )
 
