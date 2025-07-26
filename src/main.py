@@ -7,8 +7,8 @@ It orchestrates the entire pipeline from search to final sheet generation.
 Architecture:
 - Phase 1: ✅ Modular structure with configuration management
 - Phase 2: ✅ Intelligent source evaluation with LLM agent
-- Phase 3: ⏳ Web scraping implementation (placeholder)
-- Phase 4: ⏳ Enhanced LLM generation (placeholder)
+- Phase 3: ✅ Web content scraping with multiple extraction methods
+- Phase 4: ⏳ Enhanced LLM generation with full content (placeholder)
 """
 
 from typing import Dict, List, Optional
@@ -21,7 +21,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent))
 
 from config.settings import settings
-from config.models import WebSearchResult, LearningSheet, SourceEvaluation
+from config.models import WebSearchResult, LearningSheet, SourceEvaluation, ScrapedContent, ContentChunk
 from search.web_search import (
     perform_comprehensive_search,
     format_search_results,
@@ -29,6 +29,8 @@ from search.web_search import (
 )
 from agents.sheet_generator import generate_learning_sheet_from_snippets
 from agents.source_evaluator import evaluate_sources, select_top_sources
+from scraping.web_scraper import scrape_multiple_sources
+from scraping.content_processor import process_scraped_content, summarize_content_stats
 from utils.logging_utils import Timer, log_phase_start, log_phase_end, log_success, log_info
 
 
@@ -43,6 +45,8 @@ def display_system_status():
     print(f"  🔍 Search queries per topic: {settings.search.queries_per_topic}")
     print(f"  📊 Results per query: {settings.search.results_per_query}")
     print(f"  🎯 Max sources to scrape: {settings.source_selection.max_sources_to_scrape}")
+    print(f"  ⏱️  Scraping timeout: {settings.scraping.timeout}s")
+    print(f"  ⏳ Scraping delay: {settings.scraping.delay}s")
 
     print("\n🔧 System Check:")
     if check_duckduckgo_availability():
@@ -53,8 +57,8 @@ def display_system_status():
     print("\n📋 Current Implementation Status:")
     print("  ✅ Phase 1: Modular architecture with configuration")
     print("  ✅ Phase 2: Intelligent source evaluation with LLM agent")
-    print("  ⏳ Phase 3: Web scraping (placeholder)")
-    print("  ⏳ Phase 4: Enhanced generation (placeholder)")
+    print("  ✅ Phase 3: Web content scraping with multiple extraction methods")
+    print("  ⏳ Phase 4: Enhanced generation with full content (placeholder)")
     print("="*60)
 
 
@@ -117,12 +121,41 @@ def evaluate_and_select_sources(search_results: Dict[str, List[WebSearchResult]]
     return selected_sources
 
 
-def scrape_content_from_sources():
-    """Phase 3: Scrape content from selected sources (placeholder)."""
+def scrape_content_from_sources(selected_sources: List[WebSearchResult]) -> List[ContentChunk]:
+    """Phase 3: Scrape content from selected sources."""
+    timer = Timer()
+    timer.start()
+
     log_phase_start("Content Scraping")
-    log_info("Content scraping not yet implemented (Phase 3)")
-    log_info("Currently using search snippets instead of full content")
-    log_phase_end("Content Scraping", 0.1)  # Placeholder timing
+
+    if not selected_sources:
+        log_info("No sources provided for scraping")
+        duration = timer.stop()
+        log_phase_end("Content Scraping", duration)
+        return []
+
+    log_info(f"Starting to scrape {len(selected_sources)} selected sources")
+
+    # Scrape content from all selected sources
+    scraped_results = scrape_multiple_sources(selected_sources)
+
+    # Process and clean the scraped content
+    content_chunks = process_scraped_content(scraped_results)
+
+    # Generate statistics
+    stats = summarize_content_stats(content_chunks)
+
+    duration = timer.stop()
+
+    # Log results
+    successful_scrapes = sum(1 for r in scraped_results if r.success)
+    log_info(f"Scraping completed: {successful_scrapes}/{len(selected_sources)} sources successful")
+    log_info(f"Content processed: {stats['total_chunks']} chunks, {stats['total_characters']:,} characters")
+    log_info(f"Average chunk size: {stats['avg_chunk_size']} characters")
+
+    log_phase_end("Content Scraping", duration)
+
+    return content_chunks
 
 
 def generate_learning_sheet(topic: str, search_results: Dict[str, List[WebSearchResult]]) -> LearningSheet:
@@ -144,7 +177,7 @@ def generate_learning_sheet(topic: str, search_results: Dict[str, List[WebSearch
     # Create prompt and display it
     if settings.logging.verbose_output:
         print("🤖 Generating learning sheet with current implementation...")
-        print("   (Using search snippets - full content scraping in Phase 3)")
+        print("   (Using search snippets - full content integration in Phase 4)")
         print()
 
     # Generate the learning sheet
@@ -185,7 +218,7 @@ def save_phase_results(phase_name: str, topic: str, data: dict):
     filename = f"results_{phase_name}_{topic.replace(' ', '_')}.json"
     filepath = Path(filename)
 
-    # Convert WebSearchResult objects to dicts for JSON serialization
+    # Convert objects to dicts for JSON serialization
     serializable_data = {}
     for key, value in data.items():
         if key in ['search_results', 'original_search_results']:
@@ -200,12 +233,49 @@ def save_phase_results(phase_name: str, topic: str, data: dict):
                         'search_query': r.search_query
                     } for r in results
                 ]
+        elif key == 'selected_sources':
+            # Handle selected sources (list of WebSearchResult)
+            serializable_data[key] = [
+                {
+                    'url': r.url,
+                    'title': r.title,
+                    'snippet': r.snippet,
+                    'search_query': r.search_query
+                } for r in value
+            ]
+        elif key == 'scraped_content':
+            # Handle scraped content (list of ScrapedContent)
+            serializable_data[key] = [
+                {
+                    'url': content.url,
+                    'title': content.title,
+                    'content': content.content,  # ✅ FIXED: Save full content
+                    'content_length': content.content_length,
+                    'success': content.success,
+                    'error_message': content.error_message,
+                    'metadata': content.metadata,
+                    'scraped_at': content.scraped_at.isoformat()
+                } for content in value
+            ]
+        elif key == 'content_chunks':
+            # Handle content chunks (list of ContentChunk) - save full content
+            serializable_data[key] = [
+                {
+                    'source_url': chunk.source_url,
+                    'chunk_index': chunk.chunk_index,
+                    'word_count': chunk.word_count,
+                    'overlap_with_next': chunk.overlap_with_next,
+                    'content': chunk.content  # ✅ FIXED: Save full content instead of preview
+                } for chunk in value
+            ]
+        elif key == 'content_stats':
+            # Handle content statistics (already serializable)
+            serializable_data[key] = value
         else:
             serializable_data[key] = value
-    data = serializable_data
 
     with open(filepath, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        json.dump(serializable_data, f, indent=2, ensure_ascii=False)
 
     print(f"💾 Saved {phase_name} results to: {filepath}")
 
@@ -222,7 +292,7 @@ def load_phase_results(phase_name: str, topic: str) -> Optional[dict]:
     with open(filepath, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
-    # Convert back to WebSearchResult objects if needed
+    # Convert back to objects if needed
     from config.models import WebSearchResult
 
     # Handle both search_results and original_search_results
@@ -239,6 +309,17 @@ def load_phase_results(phase_name: str, topic: str) -> Optional[dict]:
                     ) for r in results
                 ]
             data[key] = converted_results
+
+    # Handle selected_sources
+    if 'selected_sources' in data:
+        data['selected_sources'] = [
+            WebSearchResult(
+                url=r['url'],
+                title=r['title'],
+                snippet=r['snippet'],
+                search_query=r.get('search_query', '')
+            ) for r in data['selected_sources']
+        ]
 
     print(f"📂 Loaded {phase_name} results from: {filepath}")
     return data
@@ -304,18 +385,77 @@ def run_phase_evaluation(topic: str, search_results: Optional[Dict[str, List[Web
     # Save results
     save_phase_results("evaluation", topic, {
         "topic": topic,
-        "selected_sources": [
-            {
-                'url': s.url,
-                'title': s.title,
-                'snippet': s.snippet,
-                'search_query': s.search_query
-            } for s in selected_sources
-        ],
+        "selected_sources": selected_sources,
         "original_search_results": search_results
     })
 
     return selected_sources
+
+
+def run_phase_scraping(topic: str, selected_sources: Optional[List[WebSearchResult]] = None, input_file: Optional[str] = None) -> List[ContentChunk]:
+    """Run Phase 3: Content scraping."""
+    if selected_sources is None:
+        if input_file:
+            # Load from specified file
+            print(f"📂 Loading evaluation results from: {input_file}")
+            if not Path(input_file).exists():
+                print(f"❌ File not found: {input_file}")
+                return []
+
+            with open(input_file, 'r', encoding='utf-8') as f:
+                saved_data = json.load(f)
+
+            # Convert back to WebSearchResult objects
+            if 'selected_sources' in saved_data:
+                from config.models import WebSearchResult
+                selected_sources = [
+                    WebSearchResult(
+                        url=r['url'],
+                        title=r['title'],
+                        snippet=r['snippet'],
+                        search_query=r.get('search_query', '')
+                    ) for r in saved_data['selected_sources']
+                ]
+                # Update topic from file if not provided
+                if 'topic' in saved_data and not topic:
+                    topic = saved_data['topic']
+            else:
+                print("❌ Invalid evaluation results file format")
+                return []
+        else:
+            # Try to load from auto-generated filename
+            saved_data = load_phase_results("evaluation", topic)
+            if saved_data is None:
+                print("❌ No evaluation results available. Run phase 2 first or specify --file.")
+                return []
+            selected_sources = saved_data['selected_sources']
+
+    print(f"\n🚀 Running Phase 3: Content Scraping for '{topic}'")
+
+    # Check if we have full content or just previews
+    existing_scraping_file = f"results_scraping_{topic.replace(' ', '_')}.json"
+    if Path(existing_scraping_file).exists():
+        print(f"⚠️  Note: Existing scraping results found. Due to recent fixes, you may want to re-run")
+        print(f"   scraping to ensure full content is saved (not just previews).")
+
+    content_chunks = scrape_content_from_sources(selected_sources)
+
+    # Also get the scraped content for saving
+    scraped_results = scrape_multiple_sources(selected_sources)
+    stats = summarize_content_stats(content_chunks)
+
+    # Save results (now with full content!)
+    save_phase_results("scraping", topic, {
+        "topic": topic,
+        "selected_sources": selected_sources,
+        "scraped_content": scraped_results,
+        "content_chunks": content_chunks,
+        "content_stats": stats
+    })
+
+    print(f"✅ Full content saved! {stats['total_characters']:,} characters across {stats['total_chunks']} chunks")
+
+    return content_chunks
 
 
 def run_phase_generation(topic: str, search_results: Optional[Dict[str, List[WebSearchResult]]] = None, input_file: Optional[str] = None) -> LearningSheet:
@@ -433,7 +573,7 @@ def run_phase_generation(topic: str, search_results: Optional[Dict[str, List[Web
 def main():
     """Main application entry point with phase control."""
     parser = argparse.ArgumentParser(description="Learning Sheet Generator")
-    parser.add_argument('--phase', choices=['search', 'eval', 'generate', 'all'],
+    parser.add_argument('--phase', choices=['search', 'eval', 'scrape', 'generate', 'all'],
                        default='all', help='Which phase to run')
     parser.add_argument('--topic', type=str, help='Topic for learning sheet')
     parser.add_argument('--file', type=str, help='Input file to load (e.g., results_search_topic.json)')
@@ -483,6 +623,7 @@ def main():
     try:
         search_results = None
         selected_sources = None
+        content_chunks = None
         sheet = None
 
         if args.phase in ['search', 'all']:
@@ -494,6 +635,17 @@ def main():
         if args.phase == 'eval':
             if selected_sources:
                 print(f"\n✅ Source evaluation complete. {len(selected_sources)} sources selected.")
+            return
+
+        if args.phase in ['scrape', 'all']:
+            content_chunks = run_phase_scraping(topic, selected_sources, args.file)
+
+        if args.phase == 'scrape':
+            if content_chunks:
+                stats = summarize_content_stats(content_chunks)
+                print(f"\n✅ Content scraping complete.")
+                print(f"📊 Results: {stats['total_chunks']} chunks, {stats['total_characters']:,} characters")
+                print(f"🌐 Sources: {stats['sources']} unique sources processed")
             return
 
         if args.phase in ['generate', 'all']:
