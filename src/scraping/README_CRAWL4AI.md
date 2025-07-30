@@ -10,6 +10,7 @@ The scraping system has been enhanced with [Crawl4AI](https://github.com/uncleco
 - **🤖 AI-Ready Markdown**: Generates clean, LLM-optimized markdown output
 - **🎯 Smart Content Filtering**: Automatically removes ads, navigation, and boilerplate
 - **📝 Better Text Extraction**: More accurate content extraction from complex layouts
+- **📄 PDF Support**: Native PDF parsing and text extraction capabilities
 
 ### **Modern Web Support**
 - **⚡ JavaScript Rendering**: Full Playwright-based browser automation
@@ -99,6 +100,26 @@ result = await scraper.scrape_dynamic_content(
 )
 ```
 
+### PDF Support
+
+```python
+from scraping.web_scraper import scrape_pdf_async
+
+# Scrape PDF documents
+pdf_result = await scrape_pdf_async("https://example.com/document.pdf")
+
+if pdf_result.success:
+    print(f"PDF Title: {pdf_result.title}")
+    print(f"Content: {pdf_result.content[:500]}...")
+    print(f"Content type: {pdf_result.metadata['content_type']}")  # 'pdf'
+
+# Mixed content scraping (automatically detects PDFs)
+from scraping.web_scraper import scrape_content_async
+
+result = await scrape_content_async("https://example.com/paper.pdf")
+# Automatically uses PDF-optimized configuration for .pdf URLs
+```
+
 ## 🏗️ Architecture
 
 ### Layered Approach
@@ -148,18 +169,28 @@ content_filter = PruningContentFilter(
 ```bash
 # Run comprehensive test suite
 python test_crawl4ai_integration.py
+
+# Test PDF scraping specifically
+python test_pdf_scraping.py
 ```
 
 ### Manual Testing
 ```python
 import asyncio
-from scraping.web_scraper import scrape_content_async
+from scraping.web_scraper import scrape_content_async, scrape_pdf_async
 
 async def test():
+    # Test web page
     result = await scrape_content_async("https://httpbin.org/html")
-    print(f"Success: {result.success}")
+    print(f"Web page - Success: {result.success}")
     print(f"Content length: {result.content_length}")
     print(f"Method: {result.metadata.get('method')}")
+
+    # Test PDF
+    pdf_result = await scrape_pdf_async("https://www.africau.edu/images/default/sample.pdf")
+    print(f"PDF - Success: {pdf_result.success}")
+    print(f"Content length: {pdf_result.content_length}")
+    print(f"Content type: {pdf_result.metadata.get('content_type')}")
 
 asyncio.run(test())
 ```
@@ -206,12 +237,12 @@ scraper = Crawl4AIScraper(headless=False)
 
 ## 📊 Performance Comparison
 
-| Method | Speed | JavaScript | Content Quality | Resource Usage |
-|--------|-------|------------|----------------|----------------|
-| **Crawl4AI** | ⭐⭐⭐⭐⭐ | ✅ Full Support | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ |
-| newspaper3k | ⭐⭐⭐ | ❌ No | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| readability | ⭐⭐⭐ | ❌ No | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
-| BeautifulSoup | ⭐⭐ | ❌ No | ⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Method | Speed | JavaScript | PDF Support | Content Quality | Resource Usage |
+|--------|-------|------------|-------------|----------------|----------------|
+| **Crawl4AI** | ⭐⭐⭐⭐⭐ | ✅ Full Support | ✅ Native | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ |
+| newspaper3k | ⭐⭐⭐ | ❌ No | ❌ No | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| readability | ⭐⭐⭐ | ❌ No | ❌ No | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+| BeautifulSoup | ⭐⭐ | ❌ No | ❌ No | ⭐⭐ | ⭐⭐⭐⭐⭐ |
 
 ## 🎯 Best Practices
 

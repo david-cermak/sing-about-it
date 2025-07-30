@@ -10,7 +10,7 @@ An intelligent learning sheet generator that combines web search with AI to crea
 
 - **🔍 Intelligent Web Search**: Multi-query web search using DuckDuckGo for comprehensive topic coverage
 - **🧠 Smart Source Evaluation**: AI-powered source evaluation and selection based on relevance and authority
-- **🌐 Enhanced Web Scraping**: AI-ready content extraction using Crawl4AI (JavaScript support) with fallback methods (newspaper3k, readability, BeautifulSoup)
+- **🌐 Enhanced Web Scraping**: AI-ready content extraction using Crawl4AI (JavaScript + PDF support) with fallback methods (newspaper3k, readability, BeautifulSoup)
 - **📄 Content Processing**: Intelligent cleaning, chunking, and quality validation of scraped content
 - **🤖 AI-Powered Generation**: Local LLM integration via Ollama for content synthesis
 - **🔄 Configurable Agent Backends**: Choose between pydantic.ai framework or direct OpenAI API calls
@@ -125,8 +125,8 @@ The system operates through four distinct phases:
 - **Output:** `results_evaluation_[topic].json`
 
 ### Phase 3: 🌐 **Content Scraping** ✅ **ENHANCED**
-- **AI-ready extraction**: Crawl4AI (JavaScript support) → newspaper3k → readability → BeautifulSoup fallback
-- **Modern web support**: Handles SPAs, dynamic content, and JavaScript-heavy sites
+- **AI-ready extraction**: Crawl4AI (JavaScript + PDF support) → newspaper3k → readability → BeautifulSoup fallback
+- **Modern web support**: Handles SPAs, dynamic content, JavaScript-heavy sites, and PDF documents
 - **Rate limiting**: Respectful delays between requests with async processing
 - **Content processing**: Cleaning, chunking, and quality validation
 - **Quality filtering**: Validates content length, structure, and coherence
@@ -249,7 +249,8 @@ The enhanced system generates comprehensive learning sheets with:
 **Test the enhanced Crawl4AI integration:**
 ```bash
 python test_crawl4ai_integration.py
-python test_crawl4ai_debug.py  # For troubleshooting
+python test_pdf_scraping.py      # Test PDF support
+python test_crawl4ai_debug.py    # For troubleshooting
 ```
 
 **Test the web scraping functionality:**
@@ -264,10 +265,10 @@ python test_agent_backends.py
 
 These tests will:
 - Verify Crawl4AI installation and browser setup
-- Demonstrate enhanced scraping with JavaScript support
+- Demonstrate enhanced scraping with JavaScript and PDF support
 - Show fallback behavior when Crawl4AI isn't available
 - Test content processing and quality validation
-- Compare traditional vs. modern scraping methods
+- Compare traditional vs. modern scraping methods for web pages and PDFs
 - Test both pydantic.ai and baremetal backends
 - Show detailed output for debugging
 

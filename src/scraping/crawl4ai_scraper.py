@@ -101,12 +101,17 @@ class Crawl4AIScraper:
                 delay_before_return_html=1.0,
             )
 
+    def _is_pdf_url(self, url: str) -> bool:
+        """Check if URL points to a PDF file."""
+        return url.lower().endswith('.pdf')
+
     async def scrape_content(self, url: str, extract_schema: Optional[Dict] = None) -> ScrapedContent:
         """
         Scrape content from a single URL using Crawl4AI.
+        Supports both web pages and PDF files.
 
         Args:
-            url: The URL to scrape
+            url: The URL to scrape (web page or PDF)
             extract_schema: Optional JSON-CSS extraction schema
 
         Returns:
@@ -114,9 +119,13 @@ class Crawl4AIScraper:
         """
         try:
             logger.info(f"Starting Crawl4AI scraping for {url}")
+            is_pdf = self._is_pdf_url(url)
+
+            if is_pdf:
+                logger.info(f"PDF detected: {url} - using PDF parsing configuration")
 
             # Configure extraction strategy if schema provided
-            if extract_schema:
+            if extract_schema and not is_pdf:  # CSS extraction doesn't work on PDFs
                 try:
                     # Try advanced configuration with extraction strategy
                     content_filter = PruningContentFilter(
@@ -154,6 +163,41 @@ class Crawl4AIScraper:
                         remove_overlay_elements=True,
                         delay_before_return_html=1.0,
                     )
+            elif is_pdf:
+                # Special configuration for PDF files
+                try:
+                    # Try advanced configuration for PDFs
+                    content_filter = PruningContentFilter(
+                        threshold=0.3,  # Lower threshold for PDFs (often have shorter paragraphs)
+                        threshold_type="fixed",
+                        min_word_threshold=10
+                    )
+                    markdown_generator = DefaultMarkdownGenerator(content_filter=content_filter)
+
+                    config = CrawlerRunConfig(
+                        cache_mode=CacheMode.ENABLED,
+                        word_count_threshold=20,  # Lower threshold for PDFs
+                        markdown_generator=markdown_generator,
+                        scan_full_page=False,  # PDFs don't need scrolling
+                        process_iframes=False,
+                        remove_overlay_elements=False,  # PDFs don't have overlays
+                        delay_before_return_html=0.5,  # Less delay needed for PDFs
+                        wait_until="networkidle",  # Wait for PDF to load
+                        page_timeout=60000,  # PDFs might take longer to process
+                    )
+                except Exception as e:
+                    # Fallback to basic config for PDFs
+                    logger.warning(f"Advanced PDF config failed, using basic: {e}")
+                    config = CrawlerRunConfig(
+                        cache_mode=CacheMode.ENABLED,
+                        word_count_threshold=20,
+                        scan_full_page=False,
+                        process_iframes=False,
+                        remove_overlay_elements=False,
+                        delay_before_return_html=0.5,
+                        wait_until="networkidle",
+                        page_timeout=60000,
+                    )
             else:
                 config = self.crawler_config
 
@@ -179,16 +223,33 @@ class Crawl4AIScraper:
                 if not content and result.markdown:
                     content = result.markdown.raw_markdown
 
-                # Get title from metadata or result
+                # For PDFs, check if content extraction was successful
+                if is_pdf and len(content.strip()) < 50:
+                    logger.warning(f"PDF content extraction yielded minimal text for {url} - may be image-heavy or presentation format")
+                    # Try to get raw HTML content as fallback
+                    if hasattr(result, 'html') and result.html:
+                        content = f"PDF Content (raw): {result.html[:1000]}"  # Limit to avoid huge content
+                    elif len(content.strip()) == 0:
+                        content = f"PDF file detected but minimal text content extracted. This may be an image-heavy document, presentation, or scanned PDF: {url}"
+
+                # Get title from metadata or result with proper validation
                 title = "No title found"
-                if result.metadata and 'title' in result.metadata:
-                    title = result.metadata['title']
+                if result.metadata and 'title' in result.metadata and result.metadata['title']:
+                    title = str(result.metadata['title']).strip()
                 elif hasattr(result, 'title') and result.title:
-                    title = result.title
+                    title = str(result.title).strip()
+
+                # Ensure title is never None or empty
+                if not title or title.strip() == '':
+                    if is_pdf:
+                        title = f"PDF Document: {url.split('/')[-1]}"
+                    else:
+                        title = "No title found"
 
                 # Prepare metadata with safe attribute access
                 metadata = {
                     'method': 'crawl4ai',
+                    'content_type': 'pdf' if is_pdf else 'webpage',
                     'status_code': getattr(result, 'status_code', None),
                     'timestamp': getattr(result, 'timestamp', None),
                 }
@@ -220,24 +281,48 @@ class Crawl4AIScraper:
                 if links:
                     metadata['links'] = links
 
+                # Determine success based on content type
+                content_length = len(content.strip())
+
+                # For PDFs, be more lenient with content length requirements
+                if is_pdf:
+                    # PDFs are successful if we got any content or if we at least detected it's a PDF
+                    success = content_length > 0
+                    if not success:
+                        logger.warning(f"PDF extraction failed - no content extracted from {url}")
+                else:
+                    # For web pages, use standard content length validation
+                    success = content_length >= 50
+
                 return ScrapedContent(
                     url=url,
                     title=title,
                     content=content,
-                    content_length=len(content),
-                    success=True,
+                    content_length=content_length,
+                    success=success,
                     metadata=metadata
                 )
 
         except Exception as e:
             logger.error(f"Crawl4AI scraping failed for {url}: {str(e)}")
+
+            # Provide more specific error messages for PDFs
+            is_pdf = self._is_pdf_url(url)
+            if is_pdf:
+                error_msg = f"PDF scraping error: {str(e)}. This may be an image-heavy presentation or scanned document."
+                title = f"PDF Scraping Failed: {url.split('/')[-1]}"
+            else:
+                error_msg = f"Crawl4AI error: {str(e)}"
+                title = "Scraping Failed"
+
             return ScrapedContent(
                 url=url,
-                title="Scraping Failed",
+                title=title,
                 content="",
                 content_length=0,
                 success=False,
-                error_message=f"Crawl4AI error: {str(e)}"
+                error_message=error_msg,
+                metadata={'method': 'crawl4ai', 'content_type': 'pdf' if is_pdf else 'webpage'}
             )
 
     async def scrape_multiple_sources(self,
@@ -295,6 +380,7 @@ class Crawl4AIScraper:
                                    css_schema: Dict) -> ScrapedContent:
         """
         Scrape content with structured data extraction using CSS selectors.
+        Note: CSS extraction is not available for PDF files.
 
         Args:
             url: The URL to scrape
@@ -303,7 +389,26 @@ class Crawl4AIScraper:
         Returns:
             ScrapedContent with extracted structured data
         """
+        if self._is_pdf_url(url):
+            logger.warning(f"CSS extraction not supported for PDF: {url}")
+            return await self.scrape_content(url)  # Scrape without schema
         return await self.scrape_content(url, css_schema)
+
+    async def scrape_pdf(self, url: str) -> ScrapedContent:
+        """
+        Scrape content from a PDF file using Crawl4AI.
+
+        Args:
+            url: The URL of the PDF file to scrape
+
+        Returns:
+            ScrapedContent object with PDF text content
+        """
+        if not self._is_pdf_url(url):
+            logger.warning(f"URL does not appear to be a PDF: {url}")
+
+        logger.info(f"Scraping PDF: {url}")
+        return await self.scrape_content(url)
 
     async def scrape_dynamic_content(self,
                                    url: str,

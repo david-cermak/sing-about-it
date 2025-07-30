@@ -59,10 +59,9 @@ class WebScraper:
             if not (bool(parsed.netloc) and parsed.scheme in ['http', 'https']):
                 return False
 
-            # Check for PDF files (not supported by HTML extractors)
+            # PDF files are now supported via Crawl4AI
             if url.lower().endswith('.pdf'):
-                logger.warning(f"PDF file detected: {url} - PDF extraction not yet implemented")
-                return False
+                logger.info(f"PDF file detected: {url} - will use Crawl4AI for PDF extraction")
 
             return True
         except Exception:
@@ -225,12 +224,25 @@ class WebScraper:
             scraper = get_crawl4ai_scraper()
             result = await scraper.scrape_content(url)
 
-            if result and result.success and result.content_length > 100:
-                logger.info(f"Crawl4AI successfully scraped {url}")
-                return result
+            # Check if it's a PDF - use different validation criteria
+            is_pdf = url.lower().endswith('.pdf')
+
+            if is_pdf:
+                # For PDFs, any result is better than traditional methods (which can't handle PDFs)
+                if result:
+                    logger.info(f"Crawl4AI processed PDF {url} - success: {result.success}, content: {result.content_length} chars")
+                    return result  # Return PDF results even if minimal content
+                else:
+                    logger.warning(f"Crawl4AI failed to process PDF {url}")
+                    return None
             else:
-                logger.warning(f"Crawl4AI extraction insufficient for {url}")
-                return None
+                # For web pages, use original validation
+                if result and result.success and result.content_length > 100:
+                    logger.info(f"Crawl4AI successfully scraped {url}")
+                    return result
+                else:
+                    logger.warning(f"Crawl4AI extraction insufficient for {url}")
+                    return None
 
         except Exception as e:
             logger.warning(f"Crawl4AI failed for {url}: {str(e)}")
@@ -414,8 +426,8 @@ async def scrape_content_async(url: str) -> ScrapedContent:
     """
     Scrape content from a single URL using async Crawl4AI.
 
-    More efficient than the sync version, especially for JavaScript-heavy sites.
-    Falls back to sync scraping if Crawl4AI is not available.
+    More efficient than the sync version, especially for JavaScript-heavy sites
+    and PDF files. Falls back to sync scraping if Crawl4AI is not available.
     """
     if CRAWL4AI_AVAILABLE:
         try:
@@ -426,3 +438,42 @@ async def scrape_content_async(url: str) -> ScrapedContent:
 
     # Fallback to sync scraping
     return scrape_content(url)
+
+
+async def scrape_pdf_async(url: str) -> ScrapedContent:
+    """
+    Scrape content from a PDF file using Crawl4AI.
+
+    This function is specifically optimized for PDF files and provides
+    better extraction than traditional web scraping methods.
+
+    Args:
+        url: URL of the PDF file to scrape
+
+    Returns:
+        ScrapedContent object with PDF text content
+    """
+    if not CRAWL4AI_AVAILABLE:
+        logger.error("Crawl4AI is required for PDF scraping but not available")
+        return ScrapedContent(
+            url=url,
+            title="PDF Scraping Failed",
+            content="",
+            content_length=0,
+            success=False,
+            error_message="Crawl4AI not available - PDF scraping requires Crawl4AI"
+        )
+
+    try:
+        scraper = get_crawl4ai_scraper()
+        return await scraper.scrape_pdf(url)
+    except Exception as e:
+        logger.error(f"PDF scraping failed for {url}: {str(e)}")
+        return ScrapedContent(
+            url=url,
+            title="PDF Scraping Failed",
+            content="",
+            content_length=0,
+            success=False,
+            error_message=f"PDF scraping error: {str(e)}"
+        )
