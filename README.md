@@ -10,7 +10,7 @@ An intelligent learning sheet generator that combines web search with AI to crea
 
 - **🔍 Intelligent Web Search**: Multi-query web search using DuckDuckGo for comprehensive topic coverage
 - **🧠 Smart Source Evaluation**: AI-powered source evaluation and selection based on relevance and authority
-- **🌐 Robust Web Scraping**: Full-text content extraction using multiple methods (newspaper3k, readability, BeautifulSoup)
+- **🌐 Enhanced Web Scraping**: AI-ready content extraction using Crawl4AI (JavaScript support) with fallback methods (newspaper3k, readability, BeautifulSoup)
 - **📄 Content Processing**: Intelligent cleaning, chunking, and quality validation of scraped content
 - **🤖 AI-Powered Generation**: Local LLM integration via Ollama for content synthesis
 - **🔄 Configurable Agent Backends**: Choose between pydantic.ai framework or direct OpenAI API calls
@@ -54,7 +54,18 @@ An intelligent learning sheet generator that combines web search with AI to crea
    pip install -r requirements.txt
    ```
 
-4. **Configure environment:**
+4. **Setup Crawl4AI browsers (for enhanced scraping):**
+   ```bash
+   # Install Playwright browsers for Crawl4AI
+   crawl4ai-setup
+
+   # Alternative if above fails:
+   # playwright install chromium
+   ```
+
+   > **Note:** This downloads browser binaries (~100-200MB) needed for JavaScript-enabled scraping. Skip this step if you only want basic scraping capabilities.
+
+5. **Configure environment:**
    ```bash
    # Copy and customize the configuration
    cp .env.example .env
@@ -113,9 +124,10 @@ The system operates through four distinct phases:
 - Selects top N sources for scraping (default: 8)
 - **Output:** `results_evaluation_[topic].json`
 
-### Phase 3: 🌐 **Content Scraping** ✅ **NEW**
-- **Multi-method extraction**: newspaper3k → readability → BeautifulSoup fallback
-- **Rate limiting**: Respectful delays between requests
+### Phase 3: 🌐 **Content Scraping** ✅ **ENHANCED**
+- **AI-ready extraction**: Crawl4AI (JavaScript support) → newspaper3k → readability → BeautifulSoup fallback
+- **Modern web support**: Handles SPAs, dynamic content, and JavaScript-heavy sites
+- **Rate limiting**: Respectful delays between requests with async processing
 - **Content processing**: Cleaning, chunking, and quality validation
 - **Quality filtering**: Validates content length, structure, and coherence
 - **Output:** `results_scraping_[topic].json`
@@ -234,6 +246,12 @@ The enhanced system generates comprehensive learning sheets with:
 
 ## 🧪 Testing
 
+**Test the enhanced Crawl4AI integration:**
+```bash
+python test_crawl4ai_integration.py
+python test_crawl4ai_debug.py  # For troubleshooting
+```
+
 **Test the web scraping functionality:**
 ```bash
 python test_web_scraping.py
@@ -245,10 +263,12 @@ python test_agent_backends.py
 ```
 
 These tests will:
-- Demonstrate scraping with multiple extraction methods
-- Show content processing and quality validation
+- Verify Crawl4AI installation and browser setup
+- Demonstrate enhanced scraping with JavaScript support
+- Show fallback behavior when Crawl4AI isn't available
+- Test content processing and quality validation
+- Compare traditional vs. modern scraping methods
 - Test both pydantic.ai and baremetal backends
-- Compare performance and reliability
 - Show detailed output for debugging
 
 For detailed usage instructions and examples, see [BACKEND_USAGE.md](BACKEND_USAGE.md).
@@ -262,11 +282,13 @@ For detailed usage instructions and examples, see [BACKEND_USAGE.md](BACKEND_USA
 - **ddgs**: DuckDuckGo search functionality
 - **python-dotenv**: Environment configuration
 
-### Web Scraping Dependencies ✅ NEW
-- **newspaper3k**: Primary article extraction
-- **readability-lxml**: Content extraction fallback
-- **beautifulsoup4**: HTML parsing and cleaning
-- **requests**: HTTP client for scraping
+### Web Scraping Dependencies ✅ **ENHANCED**
+- **crawl4ai**: Modern AI-ready web scraping with JavaScript support (primary method)
+- **playwright**: Browser automation for Crawl4AI (auto-installed)
+- **newspaper3k**: Article extraction (fallback method)
+- **readability-lxml**: Content extraction (fallback method)
+- **beautifulsoup4**: HTML parsing and cleaning (fallback method)
+- **requests**: HTTP client for traditional scraping
 - **fake-useragent**: Rotating user agents for respectful scraping
 - **markdownify**: HTML to Markdown conversion
 - **validators**: URL validation

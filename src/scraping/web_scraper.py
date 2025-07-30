@@ -1,4 +1,4 @@
-"""Web content scraping functionality."""
+"""Web content scraping functionality with Crawl4AI integration."""
 
 import time
 import asyncio
@@ -21,6 +21,13 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from config.models import ScrapedContent, WebSearchResult
 from config.settings import settings
+
+# Try to import Crawl4AI scraper
+try:
+    from scraping.crawl4ai_scraper import get_crawl4ai_scraper, CRAWL4AI_AVAILABLE
+except ImportError:
+    CRAWL4AI_AVAILABLE = False
+    logger.warning("Crawl4AI scraper not available, using fallback methods only")
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -208,11 +215,33 @@ class WebScraper:
             logger.warning(f"BeautifulSoup failed for {url}: {str(e)}")
             return None
 
+    async def _try_crawl4ai(self, url: str) -> Optional[ScrapedContent]:
+        """Try to scrape using Crawl4AI first."""
+        if not CRAWL4AI_AVAILABLE:
+            return None
+
+        try:
+            logger.info(f"Trying Crawl4AI extraction for {url}")
+            scraper = get_crawl4ai_scraper()
+            result = await scraper.scrape_content(url)
+
+            if result and result.success and result.content_length > 100:
+                logger.info(f"Crawl4AI successfully scraped {url}")
+                return result
+            else:
+                logger.warning(f"Crawl4AI extraction insufficient for {url}")
+                return None
+
+        except Exception as e:
+            logger.warning(f"Crawl4AI failed for {url}: {str(e)}")
+            return None
+
     def scrape_content(self, url: str) -> ScrapedContent:
         """
         Scrape content from a single URL using multiple extraction methods.
 
-        Tries newspaper3k first, then readability, then BeautifulSoup as fallback.
+        Tries Crawl4AI first for best results, then falls back to newspaper3k,
+        readability, and BeautifulSoup.
         """
         if not self._is_valid_url(url):
             return ScrapedContent(
@@ -225,6 +254,26 @@ class WebScraper:
             )
 
         logger.info(f"Starting scraping for {url}")
+
+        # Try Crawl4AI first if available
+        if CRAWL4AI_AVAILABLE:
+            try:
+                # Run async crawl4ai in sync context
+                loop = None
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                crawl4ai_result = loop.run_until_complete(self._try_crawl4ai(url))
+                if crawl4ai_result and crawl4ai_result.success:
+                    return crawl4ai_result
+            except Exception as e:
+                logger.warning(f"Crawl4AI attempt failed for {url}: {str(e)}")
+
+        # Fall back to traditional methods
+        logger.info(f"Falling back to traditional scraping methods for {url}")
 
         # Rotate user agent for each request to reduce blocking
         self.session.headers.update({'User-Agent': ua.random})
@@ -269,9 +318,25 @@ class WebScraper:
             error_message=error_message
         )
 
+    async def scrape_multiple_sources_async(self, sources: List[WebSearchResult]) -> List[ScrapedContent]:
+        """
+        Scrape content from multiple sources using Crawl4AI async capabilities.
+        """
+        if CRAWL4AI_AVAILABLE and len(sources) > 1:
+            try:
+                logger.info(f"Using Crawl4AI async scraping for {len(sources)} sources")
+                scraper = get_crawl4ai_scraper()
+                return await scraper.scrape_multiple_sources(sources)
+            except Exception as e:
+                logger.warning(f"Crawl4AI async scraping failed: {str(e)}, falling back to sync")
+
+        # Fallback to sync scraping
+        return self.scrape_multiple_sources(sources)
+
     def scrape_multiple_sources(self, sources: List[WebSearchResult]) -> List[ScrapedContent]:
         """
         Scrape content from multiple sources with rate limiting.
+        For better performance with multiple sources, consider using scrape_multiple_sources_async.
         """
         results = []
 
@@ -315,8 +380,9 @@ def scrape_content(url: str) -> ScrapedContent:
     """
     Scrape content from a single URL.
 
-    Uses newspaper3k for article extraction with BeautifulSoup fallback.
-    Handles different content types and implements rate limiting.
+    Tries Crawl4AI first for best results, then falls back to newspaper3k,
+    readability, and BeautifulSoup. Handles different content types and
+    implements rate limiting.
     """
     scraper = get_scraper()
     return scraper.scrape_content(url)
@@ -326,7 +392,37 @@ def scrape_multiple_sources(sources: List[WebSearchResult]) -> List[ScrapedConte
     """
     Scrape content from multiple sources.
 
-    Implements async scraping for performance with error handling and retries.
+    Uses sync scraping with rate limiting. For better performance with
+    multiple sources, consider using scrape_multiple_sources_async.
     """
     scraper = get_scraper()
     return scraper.scrape_multiple_sources(sources)
+
+
+async def scrape_multiple_sources_async(sources: List[WebSearchResult]) -> List[ScrapedContent]:
+    """
+    Scrape content from multiple sources using async Crawl4AI capabilities.
+
+    This is significantly faster than the sync version for multiple URLs.
+    Falls back to sync scraping if Crawl4AI is not available.
+    """
+    scraper = get_scraper()
+    return await scraper.scrape_multiple_sources_async(sources)
+
+
+async def scrape_content_async(url: str) -> ScrapedContent:
+    """
+    Scrape content from a single URL using async Crawl4AI.
+
+    More efficient than the sync version, especially for JavaScript-heavy sites.
+    Falls back to sync scraping if Crawl4AI is not available.
+    """
+    if CRAWL4AI_AVAILABLE:
+        try:
+            scraper = get_crawl4ai_scraper()
+            return await scraper.scrape_content(url)
+        except Exception as e:
+            logger.warning(f"Async scraping failed for {url}: {str(e)}, falling back to sync")
+
+    # Fallback to sync scraping
+    return scrape_content(url)
