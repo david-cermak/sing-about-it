@@ -73,15 +73,33 @@ class BaremetalBackend(AgentBackend):
             self._try_openai_compatible,
         ]
 
-        for strategy in strategies:
+        last_error = None
+        for i, strategy in enumerate(strategies):
+            strategy_name = strategy.__name__
             try:
+                print(f"   🔧 DEBUG: Trying strategy {i+1}: {strategy_name}")
                 raw_response = strategy(prompt, enhanced_system_prompt)
                 if raw_response:
-                    return validate_and_create_model(raw_response, output_type)
+                    print(f"   📥 DEBUG: Got response ({len(raw_response)} chars): {raw_response[:200]}...")
+                    try:
+                        result = validate_and_create_model(raw_response, output_type)
+                        print(f"   ✅ DEBUG: Strategy {strategy_name} succeeded")
+                        return result
+                    except Exception as validation_error:
+                        print(f"   ❌ DEBUG: Strategy {strategy_name} - validation failed: {validation_error}")
+                        print(f"   📄 DEBUG: Raw response: {raw_response}")
+                        last_error = validation_error
+                        continue
+                else:
+                    print(f"   ❌ DEBUG: Strategy {strategy_name} - no response")
             except Exception as e:
+                print(f"   ❌ DEBUG: Strategy {strategy_name} - exception: {e}")
+                last_error = e
                 continue  # Try next strategy
 
-        raise APIError("All API strategies failed to generate valid response")
+        error_msg = f"All API strategies failed. Last error: {last_error}"
+        print(f"   ❌ DEBUG: {error_msg}")
+        raise APIError(error_msg)
 
     def _try_ollama_direct(self, prompt: str, system_prompt: str) -> str:
         """Try direct Ollama API call."""
@@ -192,9 +210,39 @@ class BaremetalBackend(AgentBackend):
 
         example_json_str = json.dumps(example_json, indent=2)
 
-        return f"""{self.system_prompt}
+        # Check if this is for summary generation (easier structured text format)
+        if any(field in properties for field in ["summary", "key_points", "confidence_score"]):
+            return f"""{self.system_prompt}
 
-CRITICAL: You MUST return ONLY a valid JSON object with these exact fields:
+RESPONSE FORMAT:
+Use this structured text format (much easier than JSON):
+
+SUMMARY:
+[Write a comprehensive summary here - can be multiple paragraphs]
+
+KEY_POINTS:
+- First key point
+- Second key point
+- Third key point
+- Fourth key point
+- Fifth key point
+
+CONFIDENCE: [number between 0.0 and 1.0, e.g., 0.85]
+
+IMPORTANT:
+- Write in natural language - no JSON syntax needed
+- Summary can be as long as helpful (no artificial limits)
+- Each key point should be clear and informative
+- Use simple dashes (-) for bullet points
+- End with a confidence score between 0.0 and 1.0
+
+This format is much more natural to write than JSON!"""
+
+        else:
+            # Fallback to JSON for other response types
+            return f"""{self.system_prompt}
+
+You MUST return a valid JSON object with these exact fields:
 
 Required fields: {required}
 All fields: {list(properties.keys())}
@@ -202,11 +250,4 @@ All fields: {list(properties.keys())}
 Example format:
 {example_json_str}
 
-IMPORTANT:
-1. Return ONLY the JSON object, no other text
-2. Do not wrap in markdown code blocks
-3. Use proper JSON syntax with quotes around strings
-4. Boolean values should be true/false (not "true"/"false")
-5. Numbers should be numeric values, not strings
-
-Return your response as valid JSON only."""
+Return valid JSON only."""
