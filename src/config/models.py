@@ -53,16 +53,34 @@ class LearningSheet(BaseModel):
 
 
 class EnhancedLearningSheet(BaseModel):
-    """Enhanced learning sheet model with additional metadata."""
+    """Enhanced learning sheet model with semantic processing metadata (Phase 4)."""
     title: str = Field(description="Title of the learning sheet")
-    content: str = Field(description="~2000 word comprehensive report in Markdown")
-    key_takeaways: List[str] = Field(description="5-7 bullet point takeaways")
-    sources_used: List[str] = Field(description="URLs of sources actually referenced")
-    confidence_score: float = Field(ge=0.0, le=1.0, description="Confidence in information accuracy")
+    content: str = Field(description="3,000-4,000 word comprehensive report in Markdown")
+    key_takeaways: List[str] = Field(description="5-7 bullet point takeaways", default_factory=list)
+    sources_used: List[str] = Field(description="URLs of sources actually referenced", default_factory=list)
+    confidence_score: float = Field(ge=0.0, le=1.0, description="Confidence in information accuracy", default=0.0)
     topic: str = Field(description="Original topic requested")
     generated_at: datetime = Field(default_factory=datetime.now, description="When the sheet was generated")
-    total_sources_scraped: int = Field(description="Number of sources successfully scraped")
-    total_content_length: int = Field(description="Total length of source content used")
+    total_sources_scraped: int = Field(description="Number of sources successfully scraped", default=0)
+    total_content_length: int = Field(description="Total length of source content used", default=0)
+
+    # New semantic processing fields
+    topic_sections: List[Dict[str, Any]] = Field(
+        description="Organized semantic topic sections with metadata",
+        default_factory=list
+    )
+    semantic_processing_stats: Dict[str, Any] = Field(
+        description="Statistics from semantic analysis and orchestration",
+        default_factory=dict
+    )
+    cross_topic_connections: List[str] = Field(
+        description="Identified relationships and connections between topics",
+        default_factory=list
+    )
+    word_count: int = Field(description="Actual word count of generated content", default=0)
+    topics_analyzed: int = Field(description="Number of semantic topics identified", default=0)
+    topics_summarized: int = Field(description="Number of topics successfully summarized", default=0)
+    parallel_processing_time: float = Field(description="Time saved through parallel processing", default=0.0)
 
 
 class ProcessingStats(BaseModel):

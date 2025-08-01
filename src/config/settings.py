@@ -70,6 +70,23 @@ class AgentConfig(BaseModel):
     backend_type: str = Field(default="pydantic_ai", description="Agent backend type: 'pydantic_ai' or 'baremetal'")
 
 
+class SemanticConfig(BaseModel):
+    """Semantic generation configuration settings."""
+    enabled: bool = Field(default=True, description="Enable semantic generation pipeline")
+    topic_analysis_model: str = Field(default="llama3.2", description="Model for topic analysis")
+    summarization_model: str = Field(default="llama3.2", description="Model for parallel summarization")
+    orchestration_model: str = Field(default="deepseek-r1:32b", description="Model for semantic orchestration")
+    target_topic_count: int = Field(default=6, description="Target number of semantic topics")
+    min_topic_count: int = Field(default=4, description="Minimum number of topics")
+    max_topic_count: int = Field(default=8, description="Maximum number of topics")
+    max_concurrent_summarizers: int = Field(default=6, description="Maximum concurrent summarizers")
+    topic_summary_target_length: int = Field(default=2500, description="Target length for topic summaries")
+    final_sheet_target_length: int = Field(default=4000, description="Target length for final learning sheet")
+    orchestration_timeout: int = Field(default=300, description="Timeout for orchestration in seconds")
+    confidence_threshold: float = Field(default=0.75, description="Minimum confidence threshold")
+    fallback_to_snippets: bool = Field(default=True, description="Fallback to snippet-based generation on failure")
+
+
 class Settings(BaseModel):
     """Main application settings."""
     llm: LLMConfig = Field(default_factory=LLMConfig)
@@ -79,6 +96,7 @@ class Settings(BaseModel):
     content_processing: ContentProcessingConfig = Field(default_factory=ContentProcessingConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
+    semantic: SemanticConfig = Field(default_factory=SemanticConfig)
 
     @classmethod
     def from_env(cls) -> 'Settings':
@@ -120,6 +138,21 @@ class Settings(BaseModel):
             ),
             agent=AgentConfig(
                 backend_type=os.getenv('AGENT_BACKEND', 'pydantic_ai')
+            ),
+            semantic=SemanticConfig(
+                enabled=os.getenv('SEMANTIC_GENERATION_ENABLED', 'true').lower() == 'true',
+                topic_analysis_model=os.getenv('TOPIC_ANALYSIS_MODEL', 'llama3.2'),
+                summarization_model=os.getenv('SUMMARIZATION_MODEL', 'llama3.2'),
+                orchestration_model=os.getenv('ORCHESTRATION_MODEL', 'deepseek-r1:32b'),
+                target_topic_count=int(os.getenv('TARGET_TOPIC_COUNT', '6')),
+                min_topic_count=int(os.getenv('MIN_TOPIC_COUNT', '4')),
+                max_topic_count=int(os.getenv('MAX_TOPIC_COUNT', '8')),
+                max_concurrent_summarizers=int(os.getenv('MAX_CONCURRENT_SUMMARIZERS', '6')),
+                topic_summary_target_length=int(os.getenv('TOPIC_SUMMARY_TARGET_LENGTH', '2500')),
+                final_sheet_target_length=int(os.getenv('FINAL_SHEET_TARGET_LENGTH', '4000')),
+                orchestration_timeout=int(os.getenv('ORCHESTRATION_TIMEOUT', '300')),
+                confidence_threshold=float(os.getenv('CONFIDENCE_THRESHOLD', '0.75')),
+                fallback_to_snippets=os.getenv('FALLBACK_TO_SNIPPETS', 'true').lower() == 'true'
             )
         )
 

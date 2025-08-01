@@ -69,8 +69,8 @@ class BaremetalBackend(AgentBackend):
 
         # Try multiple strategies for best compatibility
         strategies = [
-            self._try_ollama_direct,
-            self._try_openai_compatible,
+            self._try_openai_compatible,  # Try this first - more reliable
+            self._try_ollama_direct,      # Fallback option
         ]
 
         last_error = None
@@ -167,7 +167,7 @@ class BaremetalBackend(AgentBackend):
                     url,
                     json=payload,
                     headers=headers or {"Content-Type": "application/json"},
-                    timeout=30
+                    timeout=300  # Extended timeout for reasoning models
                 )
 
                 if response.status_code == 200:
@@ -237,6 +237,43 @@ IMPORTANT:
 - End with a confidence score between 0.0 and 1.0
 
 This format is much more natural to write than JSON!"""
+
+        # Check if this is for orchestration (comprehensive structured text format)
+        elif any(field in properties for field in ["title", "content", "key_takeaways", "cross_connections"]):
+            return f"""{self.system_prompt}
+
+RESPONSE FORMAT:
+Use this comprehensive structured text format (optimized for long-form content):
+
+TITLE:
+[Write a comprehensive, descriptive title]
+
+CONTENT:
+[Write the complete content in Markdown format - can be very long]
+[Use proper headings, subheadings, and formatting]
+[Include all necessary details and explanations]
+
+KEY_TAKEAWAYS:
+- First major takeaway
+- Second major takeaway
+- Third major takeaway
+- Fourth major takeaway
+- Fifth major takeaway
+
+CROSS_CONNECTIONS:
+- Connection between different concepts
+- Relationship explaining how topics relate
+- Integration showing how ideas build upon each other
+
+CONFIDENCE: [number between 0.0 and 1.0, e.g., 0.85]
+
+IMPORTANT:
+- Write in natural language - no JSON syntax needed
+- Content can be as long as necessary (3,000-4,000 words)
+- Use proper Markdown formatting for structure
+- Include comprehensive details and explanations
+- Use simple dashes (-) for all bullet points
+- This format is much easier than JSON for long content!"""
 
         else:
             # Fallback to JSON for other response types

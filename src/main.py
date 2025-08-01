@@ -21,13 +21,14 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent))
 
 from config.settings import settings
-from config.models import WebSearchResult, LearningSheet, SourceEvaluation, ScrapedContent, ContentChunk
+from config.models import WebSearchResult, LearningSheet, SourceEvaluation, ScrapedContent, ContentChunk, EnhancedLearningSheet
 from search.web_search import (
     perform_comprehensive_search,
     format_search_results,
     check_duckduckgo_availability
 )
 from agents.sheet_generator import generate_learning_sheet_from_snippets
+from agents.sheet_generator_new import generate_learning_sheet_from_content
 from agents.source_evaluator import evaluate_sources, select_top_sources
 from scraping.web_scraper import scrape_multiple_sources
 from scraping.content_processor import process_scraped_content, summarize_content_stats
@@ -47,6 +48,11 @@ def display_system_status():
     print(f"  🎯 Max sources to scrape: {settings.source_selection.max_sources_to_scrape}")
     print(f"  ⏱️  Scraping timeout: {settings.scraping.timeout}s")
     print(f"  ⏳ Scraping delay: {settings.scraping.delay}s")
+    print(f"  🧠 Semantic generation: {'✅ Enabled' if settings.semantic.enabled else '❌ Disabled'}")
+    if settings.semantic.enabled:
+        print(f"     • Orchestration model: {settings.semantic.orchestration_model}")
+        print(f"     • Max concurrent: {settings.semantic.max_concurrent_summarizers}")
+        print(f"     • Target topics: {settings.semantic.target_topic_count}")
 
     print("\n🔧 System Check:")
     if check_duckduckgo_availability():
@@ -158,12 +164,153 @@ def scrape_content_from_sources(selected_sources: List[WebSearchResult]) -> List
     return content_chunks
 
 
-def generate_learning_sheet(topic: str, search_results: Dict[str, List[WebSearchResult]]) -> LearningSheet:
-    """Phase 4: Generate learning sheet."""
+async def run_phase_semantic_generation(topic: str, scraped_content: Optional[List[ScrapedContent]] = None, input_file: Optional[str] = None, save_markdown: bool = False) -> EnhancedLearningSheet:
+    """Run Phase 4: Semantic learning sheet generation using full scraped content."""
+
+    # Load scraped content if not provided
+    if scraped_content is None:
+        if input_file:
+            print(f"📂 Loading scraped content from: {input_file}")
+            if not Path(input_file).exists():
+                print(f"❌ File not found: {input_file}")
+                return None
+
+            with open(input_file, 'r', encoding='utf-8') as f:
+                saved_data = json.load(f)
+
+            if 'scraped_content' in saved_data:
+                from datetime import datetime
+                scraped_content = []
+                for item in saved_data['scraped_content']:
+                    scraped_content.append(ScrapedContent(
+                        url=item['url'],
+                        title=item['title'],
+                        content=item['content'],
+                        content_length=item['content_length'],
+                        success=item['success'],
+                        error_message=item.get('error_message'),
+                        metadata=item.get('metadata', {}),
+                        scraped_at=datetime.fromisoformat(item['scraped_at'])
+                    ))
+            else:
+                print("❌ Invalid scraping results file format")
+                return None
+        else:
+            # Try to load from auto-generated filename
+            saved_data = load_phase_results("scraping", topic)
+            if saved_data is None:
+                print("❌ No scraping results available. Run phase 3 first or specify --file.")
+                return None
+
+            # Convert scraped content from saved data
+            if 'scraped_content' in saved_data:
+                from datetime import datetime
+                scraped_content = []
+                for item in saved_data['scraped_content']:
+                    scraped_content.append(ScrapedContent(
+                        url=item['url'],
+                        title=item['title'],
+                        content=item['content'],
+                        content_length=item['content_length'],
+                        success=item['success'],
+                        error_message=item.get('error_message'),
+                        metadata=item.get('metadata', {}),
+                        scraped_at=datetime.fromisoformat(item['scraped_at'])
+                    ))
+            else:
+                print("❌ No scraped content found in file")
+                return None
+
+    print(f"\n🚀 Running Phase 4: Semantic Learning Sheet Generation for '{topic}'")
+
+    # Filter to successful scrapes only
+    successful_scrapes = [content for content in scraped_content if content.success and content.content.strip()]
+
+    if not successful_scrapes:
+        print("❌ No successful scraped content available for semantic generation")
+        return None
+
+    log_info(f"Processing {len(successful_scrapes)} successful scrapes for semantic generation")
+
+    timer = Timer()
+    timer.start()
+
+    try:
+        # Use the semantic generation pipeline
+        enhanced_sheet = await generate_learning_sheet_from_content(topic, successful_scrapes)
+
+        duration = timer.stop()
+        log_info(f"Semantic generation completed in {duration:.1f}s")
+        log_info(f"Generated {enhanced_sheet.word_count}-word learning sheet with {enhanced_sheet.confidence_score:.2f} confidence")
+
+        # Save results (with optional markdown)
+        save_phase_results("semantic_generation", topic, {
+            "topic": topic,
+            "title": enhanced_sheet.title,
+            "content": enhanced_sheet.content,
+            "word_count": enhanced_sheet.word_count,
+            "confidence_score": enhanced_sheet.confidence_score,
+            "topics_analyzed": enhanced_sheet.topics_analyzed,
+            "sources_used": enhanced_sheet.sources_used,
+            "key_takeaways": enhanced_sheet.key_takeaways,
+            "cross_topic_connections": enhanced_sheet.cross_topic_connections,
+            "semantic_processing_stats": enhanced_sheet.semantic_processing_stats,
+            "generated_at": enhanced_sheet.generated_at.isoformat() if hasattr(enhanced_sheet, 'generated_at') else None
+        }, save_markdown=save_markdown)
+
+        return enhanced_sheet
+
+    except Exception as e:
+        duration = timer.stop()
+        print(f"❌ Semantic generation failed after {duration:.1f}s: {e}")
+        if settings.logging.verbose_output:
+            import traceback
+            traceback.print_exc()
+
+        # For now, return None - we'll add fallback logic later
+        return None
+
+
+async def generate_learning_sheet(topic: str, search_results: Dict[str, List[WebSearchResult]], use_semantic: Optional[bool] = None, save_markdown: bool = False) -> LearningSheet:
+    """Phase 4: Generate learning sheet using semantic approach when possible."""
     timer = Timer()
     timer.start()
 
     log_phase_start("Learning Sheet Generation")
+
+    # Use configuration to determine if semantic generation is enabled
+    if use_semantic is None:
+        use_semantic = settings.semantic.enabled
+
+    # Try semantic generation first if enabled and scraped content is available
+    if use_semantic:
+        print("🎯 Attempting semantic generation using full scraped content...")
+
+        # Check if we have scraped content available
+        scraped_data = load_phase_results("scraping", topic)
+        if scraped_data and 'scraped_content' in scraped_data:
+            try:
+                enhanced_sheet = await run_phase_semantic_generation(topic, save_markdown=save_markdown)
+                if enhanced_sheet:
+                    duration = timer.stop()
+                    log_phase_end("Semantic Learning Sheet Generation", duration)
+                    log_info(f"Generated {enhanced_sheet.word_count}-word enhanced learning sheet")
+
+                    # Convert EnhancedLearningSheet to LearningSheet for compatibility
+                    # (The enhanced fields are preserved in the saved results)
+                    return LearningSheet(
+                        title=enhanced_sheet.title,
+                        content=enhanced_sheet.content
+                    )
+            except Exception as e:
+                print(f"⚠️  Semantic generation failed: {e}")
+                print("🔄 Falling back to snippet-based generation...")
+        else:
+            print("⚠️  No scraped content available for semantic generation")
+            print("🔄 Using snippet-based generation...")
+
+    # Fallback to snippet-based generation
+    print("🤖 Generating learning sheet using search snippets...")
 
     # Format search results for the AI agent
     formatted_results = format_search_results(search_results)
@@ -174,13 +321,7 @@ def generate_learning_sheet(topic: str, search_results: Dict[str, List[WebSearch
         print(f"   Number of search queries: {len(search_results)}")
         print()
 
-    # Create prompt and display it
-    if settings.logging.verbose_output:
-        print("🤖 Generating learning sheet with current implementation...")
-        print("   (Using search snippets - full content integration in Phase 4)")
-        print()
-
-    # Generate the learning sheet
+    # Generate the learning sheet using snippets
     sheet = generate_learning_sheet_from_snippets(topic, formatted_results)
     duration = timer.stop()
     log_phase_end("Learning Sheet Generation", duration)
@@ -213,8 +354,8 @@ def display_results(sheet: LearningSheet, search_results: Dict[str, List[WebSear
     print("="*60)
 
 
-def save_phase_results(phase_name: str, topic: str, data: dict):
-    """Save phase results to JSON file."""
+def save_phase_results(phase_name: str, topic: str, data: dict, save_markdown: bool = False):
+    """Save phase results to JSON file and optionally markdown."""
     filename = f"results_{phase_name}_{topic.replace(' ', '_')}.json"
     filepath = Path(filename)
 
@@ -278,6 +419,89 @@ def save_phase_results(phase_name: str, topic: str, data: dict):
         json.dump(serializable_data, f, indent=2, ensure_ascii=False)
 
     print(f"💾 Saved {phase_name} results to: {filepath}")
+
+    # Save markdown file for generation results if requested
+    if save_markdown and phase_name in ['generation', 'semantic_generation'] and 'content' in data:
+        save_learning_sheet_markdown(topic, data)
+
+
+def save_learning_sheet_markdown(topic: str, data: dict):
+    """Save learning sheet as a standalone markdown file."""
+    # Create markdown filename
+    safe_topic = topic.replace(' ', '_').replace('/', '_').replace('\\', '_')
+    md_filename = f"learning_sheet_{safe_topic}.md"
+    md_filepath = Path(md_filename)
+
+    # Extract data
+    title = data.get('title', f'Learning Sheet: {topic}')
+    content = data.get('content', '')
+    word_count = data.get('word_count', 0)
+    confidence_score = data.get('confidence_score', 0.0)
+    sources_used = data.get('sources_used', [])
+    key_takeaways = data.get('key_takeaways', [])
+    cross_topic_connections = data.get('cross_topic_connections', [])
+    topics_analyzed = data.get('topics_analyzed', 0)
+
+    # Build markdown content
+    markdown_content = f"""# {title}
+
+> **Generated by**: Semantic Learning Sheet Generator
+> **Topic**: {topic}
+> **Word Count**: {word_count:,} words
+> **Confidence Score**: {confidence_score:.2f}/1.0
+> **Topics Analyzed**: {topics_analyzed}
+> **Generated**: {data.get('generated_at', 'Unknown')}
+
+---
+
+{content}
+
+---
+
+## 📝 Key Takeaways
+
+"""
+
+    # Add key takeaways if available
+    if key_takeaways:
+        for i, takeaway in enumerate(key_takeaways, 1):
+            markdown_content += f"{i}. {takeaway}\n"
+    else:
+        markdown_content += "*No key takeaways available*\n"
+
+    # Add cross-topic connections if available
+    if cross_topic_connections:
+        markdown_content += f"\n## 🔗 Cross-Topic Connections\n\n"
+        for i, connection in enumerate(cross_topic_connections, 1):
+            markdown_content += f"{i}. {connection}\n"
+
+    # Add sources section
+    markdown_content += f"\n## 📚 Sources\n\n"
+    if sources_used:
+        for i, source in enumerate(sources_used, 1):
+            markdown_content += f"{i}. [{source}]({source})\n"
+    else:
+        markdown_content += "*No sources available*\n"
+
+    # Add generation metadata
+    semantic_stats = data.get('semantic_processing_stats', {})
+    if semantic_stats:
+        markdown_content += f"\n## 🤖 Generation Details\n\n"
+        markdown_content += f"- **Model**: {semantic_stats.get('orchestration_model', 'Unknown')}\n"
+        markdown_content += f"- **Context Used**: {semantic_stats.get('context_window_used', 0):,} characters\n"
+        markdown_content += f"- **Input Summaries**: {semantic_stats.get('input_summaries', 0)}\n"
+        markdown_content += f"- **Total Input Words**: {semantic_stats.get('total_input_words', 0):,}\n"
+        markdown_content += f"- **Compression Ratio**: {semantic_stats.get('compression_ratio', 0):.2f}\n"
+        markdown_content += f"- **Processing Method**: Semantic Intelligence Pipeline\n"
+
+    # Add footer
+    markdown_content += f"\n---\n\n*This learning sheet was generated using semantic intelligence to analyze and synthesize information from multiple sources.*\n"
+
+    # Write markdown file
+    with open(md_filepath, 'w', encoding='utf-8') as f:
+        f.write(markdown_content)
+
+    print(f"📄 Saved learning sheet markdown to: {md_filepath}")
 
 
 def load_phase_results(phase_name: str, topic: str) -> Optional[dict]:
@@ -458,7 +682,7 @@ def run_phase_scraping(topic: str, selected_sources: Optional[List[WebSearchResu
     return content_chunks
 
 
-def run_phase_generation(topic: str, search_results: Optional[Dict[str, List[WebSearchResult]]] = None, input_file: Optional[str] = None) -> LearningSheet:
+async def run_phase_generation(topic: str, search_results: Optional[Dict[str, List[WebSearchResult]]] = None, input_file: Optional[str] = None, save_markdown: bool = False) -> LearningSheet:
     """Run Phase 4: Learning sheet generation."""
     if search_results is None:
         if input_file:
@@ -533,16 +757,16 @@ def run_phase_generation(topic: str, search_results: Optional[Dict[str, List[Web
                 print(f"🔍 DEBUG: First result type: {type(first_results[0])}")
                 print(f"🔍 DEBUG: First result: {first_results[0]}")
 
-    # Add debugging for this phase
+                # Add debugging for this phase
     try:
-        sheet = generate_learning_sheet(topic, search_results)
+        sheet = await generate_learning_sheet(topic, search_results, save_markdown=save_markdown)
 
-        # Save results
+        # Save results (with optional markdown)
         save_phase_results("generation", topic, {
             "topic": topic,
             "title": sheet.title,
             "content": sheet.content
-        })
+        }, save_markdown=save_markdown)
 
         return sheet
 
@@ -570,7 +794,7 @@ def run_phase_generation(topic: str, search_results: Optional[Dict[str, List[Web
         raise
 
 
-def main():
+async def main():
     """Main application entry point with phase control."""
     parser = argparse.ArgumentParser(description="Learning Sheet Generator")
     parser.add_argument('--phase', choices=['search', 'eval', 'scrape', 'generate', 'all'],
@@ -578,6 +802,7 @@ def main():
     parser.add_argument('--topic', type=str, help='Topic for learning sheet')
     parser.add_argument('--file', type=str, help='Input file to load (e.g., results_search_topic.json)')
     parser.add_argument('--list-saves', action='store_true', help='List saved result files')
+    parser.add_argument('--save-markdown', action='store_true', help='Save learning sheet as markdown file (.md) in addition to JSON')
 
     args = parser.parse_args()
 
@@ -667,7 +892,8 @@ def main():
                     if search_data:
                         search_results = search_data['search_results']
 
-            sheet = run_phase_generation(topic, search_results, args.file)
+            import asyncio
+            sheet = await run_phase_generation(topic, search_results, args.file, save_markdown=args.save_markdown)
 
             if sheet:
                 # Display results
@@ -686,4 +912,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
